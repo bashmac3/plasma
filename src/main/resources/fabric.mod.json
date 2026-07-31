@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"id": "plasma",
+	"version": "${version}",
+	"name": "Plasma",
+	"description": "A mod that allows to execute code via a port. (dm me in telegram for source)",
+	"authors": [
+		"bashmac3"
+	],
+	"contact": {
+		"Telegram": "t.me/bashmac3"
+	},
+	"license": "MIT",
+	"icon": "assets/plasma/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"bm3.plasma.PlasmaMod"
+		],
+		"client": [
+			"bm3.plasma.client.PlasmaClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

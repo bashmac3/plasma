@@ -19,6 +19,7 @@ class GuiExamplesTest {
 
 	private static final Path GUI_DIR = Path.of("examples/gui");
 	private static final Path CLIENT_SRC = Path.of("src/client/java");
+	private static final Path SCRIPT = Path.of("scripts/send_payload.py");
 
 	@Test
 	void guiExamplePayloadsExist() throws IOException {
@@ -30,33 +31,37 @@ class GuiExamplesTest {
 	}
 
 	@Test
-	void classNamePayloadsReferenceExistingDemoClasses() throws IOException {
-		for (String file : List.of("01_button_at_origin.json", "02_widget_gallery.json")) {
-			JsonObject object = parse(file);
-			assertTrue(object.has("className"), file + " should declare a className");
-			assertTrue(object.has("method"), file + " should declare a method");
-			String className = object.get("className").getAsString();
-			String relative = className.replace('.', '/') + ".java";
-			assertTrue(Files.exists(CLIENT_SRC.resolve(relative)),
-				file + " references missing class " + className);
+	void everyGuiPayloadIsASnippetThatCallsShow() throws IOException {
+		try (Stream<Path> stream = Files.list(GUI_DIR)) {
+			for (Path file : stream.filter(p -> p.toString().endsWith(".json")).toList()) {
+				JsonObject object = parse(file);
+				assertEquals("run", object.get("method").getAsString(),
+					file.getFileName() + " should use method run");
+				String code = object.get("code").getAsString();
+				assertTrue(code.contains("SimpleGui"), file.getFileName() + " should use SimpleGui");
+				assertTrue(code.contains(".show()"), file.getFileName() + " should call .show()");
+			}
 		}
 	}
 
 	@Test
-	void snippetPayloadIsValid() throws IOException {
-		JsonObject object = parse("03_snippet_screen.json");
-		assertEquals("run", object.get("method").getAsString(), "03 should use method run");
-		String code = object.get("code").getAsString();
-		assertTrue(code.contains("SimpleGui"), "03 should build a screen via SimpleGui");
-		assertTrue(code.contains(".show()"), "03 should call show()");
-	}
-
-	@Test
-	void demoClassesImplementRunnable() throws IOException {
-		for (String className : List.of("ButtonDemo", "WidgetGalleryDemo")) {
-			String source = readClientSource("bm3/plasma/client/gui/" + className + ".java");
-			assertTrue(source.contains("implements Runnable"), className + " must implement Runnable");
-			assertTrue(source.contains("public void run()"), className + " must define run()");
+	void everyGuiPayloadReferencesOnlyExistingSimpleGuiMethods() throws IOException {
+		String simpleGui = readClientSource("bm3/plasma/client/gui/SimpleGui.java");
+		List<String> builderCalls = List.of(".button(", ".label(", ".editBox(", ".checkbox(",
+			".cycle(", ".show(", ".text(", ".checked(", ".selected(", ".close()");
+		try (Stream<Path> stream = Files.list(GUI_DIR)) {
+			for (Path file : stream.filter(p -> p.toString().endsWith(".json")).toList()) {
+				String code = parse(file).get("code").getAsString();
+				for (String call : builderCalls) {
+					if (code.contains(call)) {
+						String method = call.substring(1, call.length() - 1);
+						if (!simpleGui.contains(method)) {
+							fail(file.getFileName() + " calls builder." + method
+								+ "() but SimpleGui does not define it");
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -70,23 +75,21 @@ class GuiExamplesTest {
 	}
 
 	@Test
-	void demoClassesOnlyCallBuilderMethodsDefinedBySimpleGui() throws IOException {
-		String simpleGui = readClientSource("bm3/plasma/client/gui/SimpleGui.java");
-		List<String> builderCalls = List.of(".button(", ".label(", ".editBox(", ".checkbox(",
-			".cycle(", ".show(", ".text(", ".checked(", ".selected(");
-		for (String className : List.of("ButtonDemo", "WidgetGalleryDemo")) {
-			String source = readClientSource("bm3/plasma/client/gui/" + className + ".java");
-			for (String call : builderCalls) {
-				String method = call.substring(1, call.length() - 1);
-				if (source.contains(call) && !simpleGui.contains(method)) {
-					fail(className + " calls builder." + method + "() but SimpleGui does not define it");
-				}
-			}
-		}
+	void devScreenHasNoCompiledClassDependencies() throws IOException {
+		JsonObject dev = parse(GUI_DIR.resolve("dev_screen.json"));
+		assertTrue(dev.has("code"), "dev_screen.json should be a snippet");
+		assertTrue(!dev.has("className"), "dev_screen.json must not reference a compiled class");
 	}
 
-	private JsonObject parse(String file) throws IOException {
-		String json = Files.readString(GUI_DIR.resolve(file), StandardCharsets.UTF_8);
+	@Test
+	void sendScriptSupportsWatchMode() throws IOException {
+		String script = Files.readString(SCRIPT, StandardCharsets.UTF_8);
+		assertTrue(script.contains("--watch"), "send_payload.py should support --watch");
+		assertTrue(script.contains("time.sleep"), "watch mode should poll for changes");
+	}
+
+	private JsonObject parse(Path file) throws IOException {
+		String json = Files.readString(file, StandardCharsets.UTF_8);
 		return JsonParser.parseString(json).getAsJsonObject();
 	}
 

@@ -3,7 +3,11 @@ package bm3.plasma;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -71,5 +75,37 @@ class SnippetEvaluatorTest {
 		RuntimeException e = assertThrows(RuntimeException.class,
 			() -> SnippetEvaluator.evaluate("throw new RuntimeException(\"snippet-boom\");", "run"));
 		assertTrue(e.getMessage().contains("snippet-boom"), e.getMessage());
+	}
+
+	@Test
+	void snippetCanReferenceClassesFromTheRuntimeClasspath() throws Exception {
+		SnippetEvaluator.evaluate(
+			"System.out.println(bm3.plasma.SampleTask.class.getName());", "run");
+	}
+
+	@Test
+	void snippetCanReferenceClassesReachableOnlyViaContextClassLoaderUrls() throws Exception {
+		Path dir = Files.createTempDirectory("plasma-snippet");
+		Path sourceFile = dir.resolve("DevExtra.java");
+		Files.writeString(sourceFile,
+			"package bm3.plasma;\n"
+			+ "public class DevExtra {\n"
+			+ "    public static String tag() { return \"extra-ok\"; }\n"
+			+ "}\n");
+		javax.tools.JavaCompiler compiler = javax.tools.ToolProvider.getSystemJavaCompiler();
+		assertNotNull(compiler, "needs a JDK for in-test compilation");
+		int exit = compiler.run(null, null, null,
+			"-d", dir.toString(), sourceFile.toString());
+		assertEquals(0, exit, "helper class should compile");
+
+		ClassLoader previous = Thread.currentThread().getContextClassLoader();
+		try (java.net.URLClassLoader loader =
+				new java.net.URLClassLoader(new java.net.URL[]{dir.toUri().toURL()}, previous)) {
+			Thread.currentThread().setContextClassLoader(loader);
+			SnippetEvaluator.evaluate(
+				"System.out.println(bm3.plasma.DevExtra.tag());", "run");
+		} finally {
+			Thread.currentThread().setContextClassLoader(previous);
+		}
 	}
 }

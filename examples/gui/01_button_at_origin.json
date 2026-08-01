@@ -1,1 +1,1 @@
-{"className":"bm3.plasma.client.gui.ButtonDemo","method":"run"}
+{"method":"run","code":"bm3.plasma.client.gui.SimpleGui.Builder b = bm3.plasma.client.gui.SimpleGui.builder(\"Button at origin\"); b.button(0, 0, 100, 20, \"Click me\", () -> { System.out.println(\"Button at (0,0) clicked\"); bm3.plasma.client.gui.SimpleGui.close(); }).show();"}

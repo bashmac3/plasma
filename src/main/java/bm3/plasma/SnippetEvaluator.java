@@ -90,7 +90,7 @@ public final class SnippetEvaluator {
 		};
 
 		List<String> options = new ArrayList<>();
-		String classPath = System.getProperty("java.class.path");
+		String classPath = buildClasspath();
 		if (classPath != null && !classPath.isBlank()) {
 			options.add("-classpath");
 			options.add(classPath);
@@ -109,6 +109,33 @@ public final class SnippetEvaluator {
 			throw new IllegalStateException(error.toString());
 		}
 		return fileManager.getClasses();
+	}
+
+	private static String buildClasspath() {
+		java.util.Set<String> entries = new java.util.LinkedHashSet<>();
+		String property = System.getProperty("java.class.path");
+		if (property != null && !property.isBlank()) {
+			for (String entry : property.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
+				if (!entry.isBlank()) {
+					entries.add(entry.trim());
+				}
+			}
+		}
+		for (ClassLoader loader = Thread.currentThread().getContextClassLoader(); loader != null;
+				loader = loader.getParent()) {
+			if (loader instanceof java.net.URLClassLoader urlClassLoader) {
+				for (java.net.URL url : urlClassLoader.getURLs()) {
+					if (!url.getProtocol().equals("file")) {
+						continue;
+					}
+					try {
+						entries.add(java.nio.file.Paths.get(url.toURI()).toString());
+					} catch (java.net.URISyntaxException ignored) {
+					}
+				}
+			}
+		}
+		return String.join(java.io.File.pathSeparator, entries);
 	}
 
 	private static String getString(JsonObject object, String key) {

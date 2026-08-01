@@ -1,0 +1,1 @@
+{"method":"run","code":"bm3.plasma.client.gui.SimpleGui.Builder b = bm3.plasma.client.gui.SimpleGui.builder(\"Dev screen\"); b.label(8, 8, \"Edit this file and it re-sends\").button(8, 32, 100, 20, \"Close\", () -> bm3.plasma.client.gui.SimpleGui.close()).show();"}

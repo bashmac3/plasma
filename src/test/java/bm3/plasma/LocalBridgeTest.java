@@ -2,6 +2,8 @@ package bm3.plasma;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -11,24 +13,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LocalBridgeTest {
 
 	@Test
-	void authorizeMatchesTokenCaseInsensitively() {
+	void authorizeMatchesTokenCaseSensitively() {
 		LocalBridge bridge = new LocalBridge("Secret123");
-		assertTrue(bridge.isAuthorized("SECRET123"));
+		assertTrue(bridge.isAuthorized("Secret123"));
+		assertFalse(bridge.isAuthorized("SECRET123"));
 		assertFalse(bridge.isAuthorized("DifferentToken"));
 	}
 
 	@Test
-	void normalizeTokenLowercasesAndTrims() {
-		assertEquals("abc", LocalBridge.normalizeToken("  AbC  "));
+	void normalizeTokenTrimsOnly() {
+		assertEquals("AbC", LocalBridge.normalizeToken("  AbC  "));
 		assertEquals("", LocalBridge.normalizeToken(null));
 		assertEquals("", LocalBridge.normalizeToken("   "));
 		assertEquals("", LocalBridge.normalizeToken(""));
 	}
 
 	@Test
-	void isAuthorizedIsCaseInsensitive() {
+	void isAuthorizedIsCaseSensitive() {
 		LocalBridge bridge = new LocalBridge("ToK");
-		assertTrue(bridge.isAuthorized("tOk"));
+		assertTrue(bridge.isAuthorized("ToK"));
+		assertFalse(bridge.isAuthorized("tOk"));
 	}
 
 	@Test
@@ -52,6 +56,27 @@ class LocalBridgeTest {
 		LocalBridge bridge = new LocalBridge("tok");
 		assertFalse(bridge.isRunning());
 		assertEquals(-1, bridge.getPort());
+	}
+
+	@Test
+	void bridgeRefusesToStartWithEmptyToken() {
+		assertThrows(IOException.class, () -> new LocalBridge("").start());
+		assertThrows(IOException.class, () -> new LocalBridge("   ").start());
+	}
+
+	@Test
+	void bridgeStartsWithWhitespaceNormalizedToken() throws IOException {
+		LocalBridge bridge = new LocalBridge("  tok  ");
+		assertEquals("tok", bridge.getToken());
+		bridge.start();
+		assertTrue(bridge.isRunning());
+		bridge.close();
+	}
+
+	@Test
+	void unlockOnUnlockedBridgeReturnsFalse() {
+		assertFalse(new LocalBridge("tok").unlock());
+		assertFalse(new LocalBridge("tok").isLocked());
 	}
 
 	@Test

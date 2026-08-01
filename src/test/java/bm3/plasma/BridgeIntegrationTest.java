@@ -59,15 +59,38 @@ class BridgeIntegrationTest {
 			out.write(request.getBytes(StandardCharsets.UTF_8));
 			out.write('\n');
 			out.flush();
-			BufferedReader reader = new BufferedReader(
-				new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-			String line = reader.readLine();
-			return line == null ? "" : line;
+			return readAll(socket);
 		}
 	}
 
+	private String sendLine(String line) throws IOException {
+		try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), bridge.getPort())) {
+			socket.setSoTimeout(15000);
+			OutputStream out = socket.getOutputStream();
+			out.write(line.getBytes(StandardCharsets.UTF_8));
+			out.write('\n');
+			out.flush();
+			return readAll(socket);
+		}
+	}
+
+	private String readAll(Socket socket) throws IOException {
+		BufferedReader reader = new BufferedReader(
+			new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+		StringBuilder response = new StringBuilder();
+		String line;
+		while ((line = reader.readLine()) != null) {
+			response.append(line).append('\n');
+		}
+		return response.toString();
+	}
+
 	private void startBridge(LocalBridge.BridgeListener listener) throws IOException {
-		bridge = new LocalBridge("tok");
+		startBridge(listener, 60_000, 5);
+	}
+
+	private void startBridge(LocalBridge.BridgeListener listener, long timeoutMillis, int maxAttempts) throws IOException {
+		bridge = new LocalBridge("tok", timeoutMillis, maxAttempts);
 		bridge.setListener(listener);
 		bridge.start();
 		assertTrue(bridge.isRunning());
@@ -87,6 +110,81 @@ class BridgeIntegrationTest {
 		startBridge(new AutoExecListener());
 		String response = send("wrong", "{\"className\":\"bm3.plasma.SampleTask\"}");
 		assertTrue(response.contains("DENIED"), "got " + response);
+	}
+
+	@Test
+	void rejectsCaseMismatchedTokenWithDenied() throws Exception {
+		startBridge(new AutoExecListener());
+		String response = send("TOK", "{\"className\":\"bm3.plasma.SampleTask\"}");
+		assertTrue(response.contains("DENIED"), "got " + response);
+	}
+
+	@Test
+	void locksOutAfterRepeatedFailuresAndUnlocks() throws Exception {
+		startBridge(new AutoExecListener(), 60_000, 3);
+		for (int i = 0; i < 3; i++) {
+			assertTrue(send("wrong", "{\"className\":\"bm3.plasma.SampleTask\"}").contains("DENIED"));
+		}
+		assertTrue(bridge.isLocked());
+		assertTrue(send("tok", "{\"className\":\"bm3.plasma.SampleTask\"}").contains("LOCKED"));
+
+		assertTrue(bridge.unlock());
+		assertFalse(bridge.isLocked());
+		String ok = send("tok", "{\"className\":\"bm3.plasma.SampleTask\",\"method\":\"run\"}");
+		assertTrue(ok.contains("\"result\":0"), "got " + ok);
+	}
+
+	@Test
+	void failedAttemptsResetOnSuccessfulAuth() throws Exception {
+		startBridge(new AutoExecListener(), 60_000, 5);
+		assertTrue(send("wrong1", "{\"className\":\"bm3.plasma.SampleTask\"}").contains("DENIED"));
+		assertTrue(send("tok", "{\"className\":\"bm3.plasma.SampleTask\",\"method\":\"run\"}").contains("\"result\":0"));
+		assertEquals(0, bridge.getFailedAttempts());
+	}
+
+	@Test
+	void lockoutDisabledWhenMaxAttemptsIsZero() throws Exception {
+		startBridge(new AutoExecListener(), 60_000, 0);
+		for (int i = 0; i < 10; i++) {
+			assertTrue(send("wrong" + i, "{\"className\":\"bm3.plasma.SampleTask\"}").contains("DENIED"));
+		}
+		assertFalse(bridge.isLocked());
+		assertTrue(send("tok", "{\"className\":\"bm3.plasma.SampleTask\",\"method\":\"run\"}").contains("\"result\":0"));
+	}
+
+	@Test
+	void timeoutDisabledWhenTimeoutIsZero() throws Exception {
+		startBridge(new AutoExecListener(), 0, 5);
+		String code = "try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }";
+		String response = send("tok", "{\"code\":\"" + code + "\",\"method\":\"run\"}");
+		assertTrue(response.contains("\"result\":0"), "got " + response);
+		assertFalse(response.contains("TIMEOUT"), "got " + response);
+	}
+
+	@Test
+	void malformedRequestIsRejectedAsBadRequest() throws Exception {
+		startBridge(new AutoExecListener());
+		String notJson = sendLine("not json");
+		assertTrue(notJson.contains("BAD_REQUEST"), "got " + notJson);
+		String arrayJson = sendLine("[\"not\",\"an\",\"object\"]");
+		assertTrue(arrayJson.contains("BAD_REQUEST"), "got " + arrayJson);
+	}
+
+	@Test
+	void oversizedRequestIsRejectedAsTooLarge() throws Exception {
+		startBridge(new AutoExecListener());
+		String payload = "{" + "x".repeat(LocalBridge.MAX_REQUEST_CHARS + 1) + "}";
+		String response = send("tok", payload);
+		String preview = response.length() > 80 ? response.substring(0, 80) : response;
+		assertTrue(response.contains("TOO_LARGE"), "got " + preview);
+	}
+
+	@Test
+	void snippetExceedingTimeoutIsReportedAsTimeout() throws Exception {
+		startBridge(new AutoExecListener(), 200, 5);
+		String code = "try { Thread.sleep(5000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }";
+		String response = send("tok", "{\"code\":\"" + code + "\",\"method\":\"run\"}");
+		assertTrue(response.contains("TIMEOUT"), "got " + response);
 	}
 
 	@Test

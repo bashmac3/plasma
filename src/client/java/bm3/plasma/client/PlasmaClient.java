@@ -15,7 +15,7 @@ public class PlasmaClient implements ClientModInitializer {
 		Path configDir = FabricLoader.getInstance().getConfigDir();
 		try {
 			LocalBridgeConfig config = LocalBridgeConfig.load(configDir);
-			bridge = new LocalBridge(config.getToken());
+			bridge = new LocalBridge(config.getToken(), config.getExecutionTimeoutMillis(), config.getMaxFailedAttempts());
 			PlasmaGateway gateway = new PlasmaGateway(bridge, configDir);
 			bridge.setListener(gateway);
 			gateway.ready();

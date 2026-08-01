@@ -69,4 +69,46 @@ class LocalBridgeConfigTest {
 		String b = LocalBridgeConfig.rotate(tempDir);
 		assertNotEquals(a, b);
 	}
+
+	@Test
+	void loadsCustomTimeoutAndMaxAttempts() throws IOException {
+		Files.writeString(tempDir.resolve(LocalBridgeConfig.FILE_NAME),
+			"token=t\n"
+				+ LocalBridgeConfig.KEY_TIMEOUT_SECONDS + "=5\n"
+				+ LocalBridgeConfig.KEY_MAX_ATTEMPTS + "=3\n");
+		LocalBridgeConfig config = LocalBridgeConfig.load(tempDir);
+		assertEquals(5000, config.getExecutionTimeoutMillis());
+		assertEquals(3, config.getMaxFailedAttempts());
+	}
+
+	@Test
+	void defaultsApplyWhenSettingsMissing() throws IOException {
+		Files.writeString(tempDir.resolve(LocalBridgeConfig.FILE_NAME), "token=t\n");
+		LocalBridgeConfig config = LocalBridgeConfig.load(tempDir);
+		assertEquals(LocalBridgeConfig.DEFAULT_TIMEOUT_SECONDS * 1000, config.getExecutionTimeoutMillis());
+		assertEquals(LocalBridgeConfig.DEFAULT_MAX_ATTEMPTS, config.getMaxFailedAttempts());
+	}
+
+	@Test
+	void invalidValuesFallBackToDefaults() throws IOException {
+		Files.writeString(tempDir.resolve(LocalBridgeConfig.FILE_NAME),
+			"token=t\n"
+				+ LocalBridgeConfig.KEY_TIMEOUT_SECONDS + "=abc\n"
+				+ LocalBridgeConfig.KEY_MAX_ATTEMPTS + "=-1\n");
+		LocalBridgeConfig config = LocalBridgeConfig.load(tempDir);
+		assertEquals(LocalBridgeConfig.DEFAULT_TIMEOUT_SECONDS * 1000, config.getExecutionTimeoutMillis());
+		assertEquals(0, config.getMaxFailedAttempts());
+	}
+
+	@Test
+	void rotatePreservesCustomSettings() throws IOException {
+		Files.writeString(tempDir.resolve(LocalBridgeConfig.FILE_NAME),
+			"token=t\n"
+				+ LocalBridgeConfig.KEY_TIMEOUT_SECONDS + "=7\n"
+				+ LocalBridgeConfig.KEY_MAX_ATTEMPTS + "=2\n");
+		LocalBridgeConfig.rotate(tempDir);
+		LocalBridgeConfig config = LocalBridgeConfig.load(tempDir);
+		assertEquals(7000, config.getExecutionTimeoutMillis());
+		assertEquals(2, config.getMaxFailedAttempts());
+	}
 }

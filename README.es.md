@@ -13,6 +13,7 @@ Un mod de Fabric para Minecraft **26.2** que abre un **puente** local y permite 
 - **Payloads multi-paquete** — un array de paquetes con `packetid` / `maxpacketid`.
 - **Efectos del lado del cliente** — borrar chunks, objetos/entidades fantasma, lluvia de TNT, explosiones, lanzar al jugador.
 - **Acciones en el servidor integrado** — en un jugador solo, por ejemplo, dar objetos en el inventario real.
+- **Puente reforzado** — verificación de token sensible a mayúsculas en tiempo constante, límite de tamaño de solicitud, bloqueo contra fuerza bruta (`/plasma unlock`) y tiempo de espera por fragmento.
 - **Chat localizado** — inglés, ruso y español mediante las traducciones integradas de Minecraft.
 
 ## Compilar
@@ -52,6 +53,7 @@ El jar final se escribe en `build/libs/bm3-plasma-1.1.1.jar`. Los jars precompil
 | `/plasma unbless <hash>` | Eliminar un hash de payload bendecido |
 | `/plasma block <ip>` | Bloquear una IP inmediatamente |
 | `/plasma unblock <ip>` | Desbloquear una IP |
+| `/plasma unlock` | Despejar el bloqueo tras demasiados intentos de token fallidos |
 | `/plasma save <name>` | Guardar el payload actual como perfil |
 | `/plasma load <name>` | Ejecutar un perfil guardado inmediatamente |
 | `/plasma del <name>` | Eliminar un perfil guardado |
@@ -83,7 +85,7 @@ cd examples
 .\send.ps1 -Port 46946 -Payload .\01_hello.json
 ```
 
-El config del token se encuentra automáticamente: PrismLauncher, `.minecraft` (Legacy Launcher / vanilla) o MultiMC; como último recurso se busca en `%APPDATA%`. Se puede indicar con `-Config <ruta>` o la variable `PLASMA_CONFIG`.
+El config del token lo encuentra automáticamente `scripts/send_payload.py`: PrismLauncher, `.minecraft` (Legacy Launcher / vanilla) o MultiMC; como último recurso, una búsqueda recursiva limitada. Se puede indicar con las variables `PLASMA_CONFIG` o `PLASMA_TOKEN`.
 
 | Archivo | Qué hace |
 |---|---|
@@ -110,6 +112,11 @@ Un paquete puede ser un **fragmento** (`code`) o una **clase** (`className`). Va
 ## Configuración
 
 `config/plasma.properties` guarda el token (se genera aleatoriamente la primera vez si no existe). Todo funciona solo con loopback (`127.0.0.1`).
+
+Claves de ajuste opcionales:
+
+- `execution_timeout_seconds` — tiempo de espera por fragmento (por defecto `60`; `0` lo desactiva). Un payload que tarde más se interrumpe y se reporta como `TIMEOUT`.
+- `max_failed_attempts` — intentos de token fallidos antes de que el puente se bloquee (por defecto `5`; `0` lo desactiva). Se despeja con `/plasma unlock`.
 
 ## Licencia
 

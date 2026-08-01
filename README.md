@@ -13,6 +13,7 @@ A Fabric mod for Minecraft **26.2** that opens a **localhost** bridge and lets y
 - **Multi-packet payloads** — send a JSON array of packets with `packetid` / `maxpacketid`.
 - **Clientside effects** — erase chunks, spawn ghost items/entities, TNT rain, explosions, launch the player.
 - **Integrated-server actions** — in singleplayer, e.g. grant items into the real inventory.
+- **Hardened bridge** — case-sensitive constant-time token check, a request size limit, a brute-force lockout (`/plasma unlock`), and a per-snippet watchdog timeout.
 - **Localized chat** — English, Russian, Spanish via Minecraft's built-in translations.
 
 ## Building
@@ -52,6 +53,7 @@ The finished jar is written to `build/libs/bm3-plasma-1.1.1.jar`. Prebuilt jars 
 | `/plasma unbless <hash>` | Remove a blessed payload hash |
 | `/plasma block <ip>` | Block an IP immediately |
 | `/plasma unblock <ip>` | Unblock an IP |
+| `/plasma unlock` | Clear the lockout after too many failed token attempts |
 | `/plasma save <name>` | Save the current pending payload as a profile |
 | `/plasma load <name>` | Execute a saved profile immediately |
 | `/plasma del <name>` | Delete a saved profile |
@@ -83,7 +85,7 @@ cd examples
 .\send.ps1 -Port 46946 -Payload .\01_hello.json
 ```
 
-The token config is found automatically: PrismLauncher, `.minecraft` (Legacy Launcher / vanilla), or MultiMC; a recursive search of `%APPDATA%` is used as a fallback. Override with `-Config <path>` or the `PLASMA_CONFIG` env var.
+The token config is auto-discovered by `scripts/send_payload.py`: PrismLauncher, `.minecraft` (Legacy Launcher / vanilla), or MultiMC, then a bounded recursive search as a fallback. Override with the `PLASMA_CONFIG` or `PLASMA_TOKEN` env var.
 
 | File | What it does |
 |---|---|
@@ -110,6 +112,11 @@ A single packet can be a **snippet** (`code`) or a **class** (`className`). Mult
 ## Configuration
 
 `config/plasma.properties` stores the token (randomly generated on first run if absent). Everything is loopback-only (`127.0.0.1`).
+
+Optional tuning keys:
+
+- `execution_timeout_seconds` — per-snippet watchdog (default `60`; `0` disables). A payload running longer is interrupted and reported as `TIMEOUT`.
+- `max_failed_attempts` — failed token attempts before the bridge locks (default `5`; `0` disables). Clear it with `/plasma unlock`.
 
 ## License
 

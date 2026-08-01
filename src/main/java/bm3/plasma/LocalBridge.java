@@ -16,13 +16,19 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class LocalBridge implements AutoCloseable {
 	public interface BridgeListener {
@@ -33,19 +39,38 @@ public class LocalBridge implements AutoCloseable {
 		void onDenied(PendingRequest request, String reason);
 	}
 
+	static final int MAX_REQUEST_CHARS = 1_000_000;
+	private static final long DEFAULT_TIMEOUT_MILLIS = 60_000;
+	private static final int DEFAULT_MAX_ATTEMPTS = 5;
+
 	private volatile String expectedToken;
+	private final long executionTimeoutMillis;
+	private final int maxAttempts;
 	private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
 		Thread thread = new Thread(r);
 		thread.setDaemon(true);
 		return thread;
 	});
+	private final ScheduledExecutorService watchdog = Executors.newScheduledThreadPool(1, r -> {
+		Thread thread = new Thread(r, "plasma-watchdog");
+		thread.setDaemon(true);
+		return thread;
+	});
+	private final AtomicInteger failedAttempts = new AtomicInteger();
+	private final AtomicBoolean locked = new AtomicBoolean();
 	private final Random random = new Random();
 	private volatile ServerSocket serverSocket;
 	private volatile boolean running;
 	private volatile BridgeListener listener;
 
 	public LocalBridge(String expectedToken) {
+		this(expectedToken, DEFAULT_TIMEOUT_MILLIS, DEFAULT_MAX_ATTEMPTS);
+	}
+
+	public LocalBridge(String expectedToken, long executionTimeoutMillis, int maxAttempts) {
 		this.expectedToken = normalizeToken(expectedToken);
+		this.executionTimeoutMillis = Math.max(0, executionTimeoutMillis);
+		this.maxAttempts = Math.max(0, maxAttempts);
 	}
 
 	public void setListener(BridgeListener listener) {
@@ -61,16 +86,41 @@ public class LocalBridge implements AutoCloseable {
 	}
 
 	public boolean isAuthorized(String token) {
-		return normalizeToken(token).equals(expectedToken);
+		return constantTimeEquals(normalizeToken(token), expectedToken);
 	}
 
 	public boolean isRunning() {
 		return running;
 	}
 
+	public boolean isLocked() {
+		return locked.get();
+	}
+
+	public int getFailedAttempts() {
+		return failedAttempts.get();
+	}
+
+	public int getMaxAttempts() {
+		return maxAttempts;
+	}
+
+	public long getExecutionTimeoutMillis() {
+		return executionTimeoutMillis;
+	}
+
+	public boolean unlock() {
+		boolean wasLocked = locked.getAndSet(false);
+		failedAttempts.set(0);
+		return wasLocked;
+	}
+
 	public void start() throws IOException {
 		if (running) {
 			return;
+		}
+		if (expectedToken.isEmpty()) {
+			throw new IOException("Cannot open the bridge with an empty token");
 		}
 
 		List<Integer> ports = new ArrayList<>();
@@ -116,17 +166,33 @@ public class LocalBridge implements AutoCloseable {
 		try {
 			BufferedReader input = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
 			OutputStream output = client.getOutputStream();
-			String request = input.readLine();
+			String request = readRequest(input);
 			if (request == null || request.isBlank()) {
 				respondAndClose(client, output, 1, "EMPTY");
 				return;
 			}
+			if (request.length() > MAX_REQUEST_CHARS) {
+				respondAndClose(client, output, 1, "TOO_LARGE");
+				return;
+			}
+			if (isLocked()) {
+				respondAndClose(client, output, 1, "LOCKED");
+				return;
+			}
 
-			Request parsed = parseRequest(request);
+			Request parsed;
+			try {
+				parsed = parseRequest(request);
+			} catch (Exception e) {
+				respondAndClose(client, output, 1, "BAD_REQUEST");
+				return;
+			}
 			if (!isAuthorized(parsed.token())) {
+				registerFailure();
 				respondAndClose(client, output, 1, "DENIED");
 				return;
 			}
+			resetFailures();
 			if (parsed.payload() == null || parsed.payload().isJsonNull()) {
 				respondAndClose(client, output, 1, "NO_PAYLOAD");
 				return;
@@ -147,6 +213,22 @@ public class LocalBridge implements AutoCloseable {
 		}
 	}
 
+	private String readRequest(BufferedReader input) throws IOException {
+		StringBuilder builder = new StringBuilder();
+		int c;
+		while (true) {
+			c = input.read();
+			if (c == -1 || c == '\n') {
+				break;
+			}
+			builder.append((char) c);
+			if (builder.length() > MAX_REQUEST_CHARS) {
+				break;
+			}
+		}
+		return builder.toString();
+	}
+
 	private void respondAndClose(Socket client, OutputStream output, int result, String text) {
 		try {
 			writeJsonResponse(output, result, text);
@@ -161,13 +243,33 @@ public class LocalBridge implements AutoCloseable {
 
 	public void execute(PendingRequest pending) {
 		executor.submit(() -> {
+			Thread worker = Thread.currentThread();
+			AtomicBoolean timedOut = new AtomicBoolean(false);
+			ScheduledFuture<?> kill = null;
+			if (executionTimeoutMillis > 0) {
+				kill = watchdog.schedule(() -> {
+					timedOut.set(true);
+					worker.interrupt();
+				}, executionTimeoutMillis, TimeUnit.MILLISECONDS);
+			}
 			int result = 0;
 			String output;
 			try {
 				output = runPayload(pending.getPayload(), pending.getOutputStream());
+				if (timedOut.get()) {
+					result = 1;
+					output = "TIMEOUT";
+				}
 			} catch (Exception e) {
 				result = 1;
-				output = "ERROR " + e.getClass().getSimpleName() + ": " + e.getMessage();
+				output = timedOut.get()
+					? "TIMEOUT " + e.getClass().getSimpleName()
+					: "ERROR " + e.getClass().getSimpleName() + ": " + e.getMessage();
+			}
+			if (kill != null) {
+				kill.cancel(false);
+			}
+			if (result != 0) {
 				try {
 					writeJsonResponse(pending.getOutputStream(), result, output);
 				} catch (IOException ignored) {
@@ -206,40 +308,34 @@ public class LocalBridge implements AutoCloseable {
 	}
 
 	private String runPayload(JsonElement payload, OutputStream responseOutput) throws Exception {
-		ByteArrayOutputStream global = new ByteArrayOutputStream();
-		ByteArrayOutputStream packetSink = new ByteArrayOutputStream();
-		PrintStream capture = new PrintStream(new TeeOutputStream(global, packetSink), true, StandardCharsets.UTF_8);
-
-		PrintStream originalOut = System.out;
-		PrintStream originalErr = System.err;
+		CaptureSink sink = new CaptureSink();
+		CaptureSink previous = ACTIVE_SINK.get();
+		ACTIVE_SINK.set(sink);
 		try {
-			System.setOut(capture);
-			System.setErr(capture);
 			if (payload.isJsonArray()) {
 				JsonArray array = payload.getAsJsonArray();
 				for (JsonElement packet : array) {
-					packetSink.reset();
-					executePacket(packet, responseOutput, packetSink);
+					sink.resetPacket();
+					executePacket(packet, responseOutput, sink);
 				}
 			} else {
-				packetSink.reset();
-				executePacket(payload, responseOutput, packetSink);
+				sink.resetPacket();
+				executePacket(payload, responseOutput, sink);
 			}
-			return global.toString(StandardCharsets.UTF_8);
+			return sink.globalText();
 		} finally {
-			System.setOut(originalOut);
-			System.setErr(originalErr);
+			ACTIVE_SINK.set(previous);
 		}
 	}
 
-	private void executePacket(JsonElement packet, OutputStream output, ByteArrayOutputStream packetSink) throws Exception {
+	private void executePacket(JsonElement packet, OutputStream output, CaptureSink sink) throws Exception {
 		String packetId = null;
 		String maxPacketId = null;
 
 		if (packet.isJsonPrimitive()) {
 			String className = packet.getAsString();
 			runClass(className, "run", new String[0]);
-			writeJsonResponse(output, 0, packetSink.toString(StandardCharsets.UTF_8), null, null);
+			writeJsonResponse(output, 0, sink.packetText(), null, null);
 			return;
 		}
 
@@ -256,7 +352,7 @@ public class LocalBridge implements AutoCloseable {
 			String methodValue = getString(object, "method");
 			final String snippetMethod = methodValue == null ? "run" : methodValue;
 			SnippetEvaluator.evaluate(code, snippetMethod);
-			writeJsonResponse(output, 0, packetSink.toString(StandardCharsets.UTF_8), packetId, maxPacketId);
+			writeJsonResponse(output, 0, sink.packetText(), packetId, maxPacketId);
 			return;
 		}
 
@@ -271,7 +367,7 @@ public class LocalBridge implements AutoCloseable {
 		}
 
 		runClass(className, method, args);
-		writeJsonResponse(output, 0, packetSink.toString(StandardCharsets.UTF_8), packetId, maxPacketId);
+		writeJsonResponse(output, 0, sink.packetText(), packetId, maxPacketId);
 	}
 
 	private String[] parseArgs(JsonObject object) {
@@ -284,28 +380,6 @@ public class LocalBridge implements AutoCloseable {
 			args[i] = argsArray.get(i).getAsString();
 		}
 		return args;
-	}
-
-	private static final class TeeOutputStream extends OutputStream {
-		private final ByteArrayOutputStream global;
-		private final ByteArrayOutputStream packet;
-
-		TeeOutputStream(ByteArrayOutputStream global, ByteArrayOutputStream packet) {
-			this.global = global;
-			this.packet = packet;
-		}
-
-		@Override
-		public void write(int b) {
-			global.write(b);
-			packet.write(b);
-		}
-
-		@Override
-		public void write(byte[] b, int off, int len) {
-			global.write(b, off, len);
-			packet.write(b, off, len);
-		}
 	}
 
 	private void runClass(String className, String method, String[] args) throws Exception {
@@ -352,10 +426,22 @@ public class LocalBridge implements AutoCloseable {
 		output.write('\n');
 	}
 
+	private void registerFailure() {
+		int attempts = failedAttempts.incrementAndGet();
+		if (maxAttempts > 0 && attempts >= maxAttempts) {
+			locked.set(true);
+		}
+	}
+
+	private void resetFailures() {
+		failedAttempts.set(0);
+	}
+
 	@Override
 	public void close() throws IOException {
 		running = false;
 		executor.shutdownNow();
+		watchdog.shutdownNow();
 		if (serverSocket != null) {
 			serverSocket.close();
 		}
@@ -365,11 +451,80 @@ public class LocalBridge implements AutoCloseable {
 		if (token == null) {
 			return "";
 		}
-		String trimmed = token.trim();
-		if (trimmed.isEmpty()) {
-			return "";
+		return token.trim();
+	}
+
+	private static boolean constantTimeEquals(String a, String b) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			byte[] left = digest.digest(a.getBytes(StandardCharsets.UTF_8));
+			byte[] right = digest.digest(b.getBytes(StandardCharsets.UTF_8));
+			return MessageDigest.isEqual(left, right);
+		} catch (NoSuchAlgorithmException e) {
+			return a.equals(b);
 		}
-		return trimmed.toLowerCase(Locale.ROOT);
+	}
+
+	private static final ThreadLocal<CaptureSink> ACTIVE_SINK = new ThreadLocal<>();
+
+	private static final class CaptureSink {
+		private final ByteArrayOutputStream global = new ByteArrayOutputStream();
+		private final ByteArrayOutputStream packet = new ByteArrayOutputStream();
+
+		void writeGlobal(int b) {
+			global.write(b);
+			packet.write(b);
+		}
+
+		void writeGlobal(byte[] b, int off, int len) {
+			global.write(b, off, len);
+			packet.write(b, off, len);
+		}
+
+		void resetPacket() {
+			packet.reset();
+		}
+
+		String globalText() {
+			return global.toString(StandardCharsets.UTF_8);
+		}
+
+		String packetText() {
+			return packet.toString(StandardCharsets.UTF_8);
+		}
+	}
+
+	private static final class CapturingOutputStream extends OutputStream {
+		private final OutputStream fallback;
+
+		CapturingOutputStream(OutputStream fallback) {
+			this.fallback = fallback;
+		}
+
+		@Override
+		public void write(int b) throws IOException {
+			CaptureSink sink = ACTIVE_SINK.get();
+			if (sink != null) {
+				sink.writeGlobal(b);
+			} else {
+				fallback.write(b);
+			}
+		}
+
+		@Override
+		public void write(byte[] b, int off, int len) throws IOException {
+			CaptureSink sink = ACTIVE_SINK.get();
+			if (sink != null) {
+				sink.writeGlobal(b, off, len);
+			} else {
+				fallback.write(b, off, len);
+			}
+		}
+	}
+
+	static {
+		System.setOut(new PrintStream(new CapturingOutputStream(System.out), true, StandardCharsets.UTF_8));
+		System.setErr(new PrintStream(new CapturingOutputStream(System.err), true, StandardCharsets.UTF_8));
 	}
 
 	public record Request(String token, JsonElement payload) {

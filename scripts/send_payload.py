@@ -71,7 +71,7 @@ if len(sys.argv) < 3:
 
 host = sys.argv[1]
 port = int(sys.argv[2])
-token = sys.argv[3] if len(sys.argv) > 3 else (os.environ.get("PLASMA_TOKEN") or discover_token())
+token = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else (os.environ.get("PLASMA_TOKEN") or discover_token())
 if not token:
     print("Token not found. Pass it as an argument or set PLASMA_TOKEN.", file=sys.stderr)
     sys.exit(1)

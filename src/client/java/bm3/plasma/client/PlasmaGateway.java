@@ -162,6 +162,10 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 						unblockIp(StringArgumentType.getString(context, "ip"));
 						return 1;
 					})))
+				.then(ClientCommands.literal("unlock").executes(context -> {
+					unlock();
+					return 1;
+				}))
 				.then(ClientCommands.literal("bless").executes(context -> {
 					stageBless();
 					return 1;
@@ -336,6 +340,14 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 			styled(normalized, ChatFormatting.DARK_GREEN, ChatFormatting.ITALIC)).withStyle(ChatFormatting.GREEN)));
 	}
 
+	private void unlock() {
+		if (bridge.unlock()) {
+			feedback(message(tr("plasma.unlock.done").withStyle(ChatFormatting.GREEN)));
+		} else {
+			feedback(message(tr("plasma.unlock.notlocked").withStyle(ChatFormatting.RED)));
+		}
+	}
+
 	private void saveProfile(String name) {
 		PendingRequest request = currentRequest();
 		if (request == null) {
@@ -387,6 +399,15 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 		feedback(message(tr("plasma.status.token", code(bridge.getToken())).withStyle(ChatFormatting.GRAY)));
 		feedback(message(tr("plasma.status.echo",
 			styled(String.valueOf(echo), echo ? ChatFormatting.GREEN : ChatFormatting.RED)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.locked",
+			styled(bridge.isLocked() ? "ACTIVE" : "NONE",
+				bridge.isLocked() ? ChatFormatting.DARK_RED : ChatFormatting.DARK_GREEN).withStyle(ChatFormatting.GRAY))));
+		feedback(message(tr("plasma.status.attempts",
+			code(String.valueOf(bridge.getFailedAttempts())),
+			code(String.valueOf(bridge.getMaxAttempts())),
+			command("/plasma unlock")).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.timeout",
+			code(String.valueOf(bridge.getExecutionTimeoutMillis() / 1000)).withStyle(ChatFormatting.GRAY))));
 		feedback(message(tr("plasma.status.pending",
 			code(String.valueOf(pendingCount())).withStyle(ChatFormatting.GRAY))));
 		feedback(message(tr("plasma.status.trusted",

@@ -168,7 +168,7 @@ public class PendingRequest {
 			}
 
 			String className = "?";
-			String method = "?";
+			String method = "main";
 			String argsText = "";
 			if (primary.isJsonObject()) {
 				JsonObject object = primary.getAsJsonObject();
@@ -195,6 +195,7 @@ public class PendingRequest {
 				argsText = formatArgs(object);
 			} else if (primary.isJsonPrimitive()) {
 				className = primary.getAsString();
+				method = "run";
 			}
 
 			String ruleKey = className + "." + method;

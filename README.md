@@ -29,11 +29,11 @@ Prerequisites:
 
 On Windows use `gradlew.bat` instead of `./gradlew`.
 
-The finished jar is written to `build/libs/bm3-plasma-1.0.0.jar`. Prebuilt jars for tagged versions are published as GitHub Releases.
+The finished jar is written to `build/libs/bm3-plasma-1.1.0.jar`. Prebuilt jars for tagged versions are published as GitHub Releases.
 
 ## Installation
 
-1. Copy `build/libs/bm3-plasma-1.0.0.jar` (or download the latest jar from the GitHub Releases page) into the `mods/` folder of a **Fabric 26.2** instance (Fabric API required). Legacy Launcher / vanilla users: put it in `.minecraft/mods` and run a **Fabric** profile.
+1. Copy `build/libs/bm3-plasma-1.1.0.jar` (or download the latest jar from the GitHub Releases page) into the `mods/` folder of a **Fabric 26.2** instance (Fabric API required). Legacy Launcher / vanilla users: put it in `.minecraft/mods` and run a **Fabric** profile.
 2. Launch the game. A warning banner appears in chat. The bridge stays **closed** until you type `/plasma agree` — this prints the port it opened.
 3. Send payloads from the same machine (localhost only) with `scripts/send_payload.py` or the helpers in `examples/`.
 

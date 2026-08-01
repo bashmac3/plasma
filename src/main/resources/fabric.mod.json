@@ -8,6 +8,9 @@
 		"bashmac3"
 	],
 	"contact": {
+		"homepage": "https://github.com/bashmac3/plasma",
+		"sources": "https://github.com/bashmac3/plasma",
+		"issues": "https://github.com/bashmac3/plasma/issues",
 		"Telegram": "t.me/bashmac3"
 	},
 	"license": "MIT",

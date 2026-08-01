@@ -42,6 +42,14 @@ public class LocalBridgeConfig {
         return token;
     }
 
+    public static String rotate(Path configDirectory) throws IOException {
+        Files.createDirectories(configDirectory);
+        Path configPath = configDirectory.resolve(FILE_NAME);
+        String token = generateToken();
+        saveToken(configPath, token);
+        return token;
+    }
+
     private static final String TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private static final int TOKEN_LENGTH = 32;
 

@@ -16,7 +16,7 @@ public class PlasmaClient implements ClientModInitializer {
 		try {
 			LocalBridgeConfig config = LocalBridgeConfig.load(configDir);
 			bridge = new LocalBridge(config.getToken());
-			PlasmaGateway gateway = new PlasmaGateway(bridge);
+			PlasmaGateway gateway = new PlasmaGateway(bridge, configDir);
 			bridge.setListener(gateway);
 			gateway.ready();
 		} catch (Exception e) {

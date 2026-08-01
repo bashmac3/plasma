@@ -41,18 +41,30 @@ The finished jar is written to `build/libs/bm3-plasma-1.0.0.jar`. Prebuilt jars 
 
 | Command | Action |
 |---|---|
-| `/plasma agree` | Accept the disclaimer and open the bridge |
+| `/plasma agree` | Accept the disclaimer, rotate the token, and open the bridge |
 | `/plasma allow` | Approve the current pending request |
 | `/plasma allow always` | Trust the IP — execute everything from it automatically |
 | `/plasma deny` | Deny the current pending request |
 | `/plasma deny always` | Block the IP permanently |
 | `/plasma trust` | Trust the current request's IP |
 | `/plasma betray` | Revoke trust (and unblock) |
+| `/plasma bless` | Bless the current payload — identical payloads auto-execute from now on |
+| `/plasma unbless <hash>` | Remove a blessed payload hash |
+| `/plasma block <ip>` | Block an IP immediately |
+| `/plasma unblock <ip>` | Unblock an IP |
+| `/plasma save <name>` | Save the current pending payload as a profile |
+| `/plasma load <name>` | Execute a saved profile immediately |
+| `/plasma del <name>` | Delete a saved profile |
+| `/plasma list` | Show trusted/blocked IPs, blessed hashes, and profiles |
+| `/plasma status` | Show bridge state, token, echo, and counters |
 | `/plasma confirm` | Confirm a staged action |
 | `/plasma close` | Close the bridge (requires confirm) |
 | `/plasma forcekill` | Immediately close the bridge and deny all pending requests |
 | `/plasma echo false` | Silence all Plasma chat until `/plasma echo true` (payload output still shown) |
 | `/plasma echo true` | Restore full output |
+
+The token shown by `/plasma agree` and `/plasma status` is also written to
+`config/plasma.properties` after each rotation, so the send scripts always pick up the current one.
 
 ## Examples
 

@@ -41,18 +41,30 @@ El jar final se escribe en `build/libs/bm3-plasma-1.0.0.jar`. Los jars precompil
 
 | Comando | Acción |
 |---|---|
-| `/plasma agree` | Aceptar el aviso y abrir el puente |
+| `/plasma agree` | Aceptar el aviso, rotar el token y abrir el puente |
 | `/plasma allow` | Aprobar la solicitud pendiente actual |
 | `/plasma allow always` | Confiar en la IP: ejecutar todo de ella automáticamente |
 | `/plasma deny` | Denegar la solicitud pendiente actual |
 | `/plasma deny always` | Bloquear la IP permanentemente |
 | `/plasma trust` | Confiar en la IP de la solicitud actual |
 | `/plasma betray` | Revocar confianza (y desbloquear) |
+| `/plasma bless` | Bendecir el payload actual: payloads idénticos se auto-ejecutarán |
+| `/plasma unbless <hash>` | Eliminar un hash de payload bendecido |
+| `/plasma block <ip>` | Bloquear una IP inmediatamente |
+| `/plasma unblock <ip>` | Desbloquear una IP |
+| `/plasma save <name>` | Guardar el payload actual como perfil |
+| `/plasma load <name>` | Ejecutar un perfil guardado inmediatamente |
+| `/plasma del <name>` | Eliminar un perfil guardado |
+| `/plasma list` | Mostrar IPs de confianza/bloqueadas, hashes bendecidos y perfiles |
+| `/plasma status` | Mostrar estado del puente, token, eco y contadores |
 | `/plasma confirm` | Confirmar una acción pendiente |
 | `/plasma close` | Cerrar el puente (requiere confirmación) |
 | `/plasma forcekill` | Cerrar el puente y denegar todas las solicitudes pendientes |
 | `/plasma echo false` | Silenciar el chat de Plasma hasta `/plasma echo true` (la salida del payload sigue visible) |
 | `/plasma echo true` | Restaurar la salida completa |
+
+El token mostrado por `/plasma agree` y `/plasma status` también se escribe en
+`config/plasma.properties` tras cada rotación, así los scripts siempre usan el actual.
 
 ## Ejemplos
 

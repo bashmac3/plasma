@@ -33,7 +33,7 @@ public class LocalBridge implements AutoCloseable {
 		void onDenied(PendingRequest request, String reason);
 	}
 
-	private final String expectedToken;
+	private volatile String expectedToken;
 	private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
 		Thread thread = new Thread(r);
 		thread.setDaemon(true);
@@ -50,6 +50,14 @@ public class LocalBridge implements AutoCloseable {
 
 	public void setListener(BridgeListener listener) {
 		this.listener = listener;
+	}
+
+	public void setToken(String token) {
+		this.expectedToken = normalizeToken(token);
+	}
+
+	public String getToken() {
+		return expectedToken;
 	}
 
 	public boolean isAuthorized(String token) {
@@ -151,7 +159,7 @@ public class LocalBridge implements AutoCloseable {
 		}
 	}
 
-	void execute(PendingRequest pending) {
+	public void execute(PendingRequest pending) {
 		executor.submit(() -> {
 			int result = 0;
 			String output;

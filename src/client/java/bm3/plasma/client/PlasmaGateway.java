@@ -1,8 +1,10 @@
 package bm3.plasma.client;
 
 import bm3.plasma.LocalBridge;
+import bm3.plasma.LocalBridgeConfig;
 import bm3.plasma.PendingRequest;
-import bm3.plasma.PlasmaMod;
+import bm3.plasma.ProfileStore;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -12,8 +14,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -25,17 +30,22 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 	}
 
 	private final LocalBridge bridge;
+	private final Path configDir;
 	private final Minecraft mc = Minecraft.getInstance();
 	private final ConcurrentLinkedQueue<Component> pendingChat = new ConcurrentLinkedQueue<>();
 	private final Deque<PendingRequest> pendingRequests = new ArrayDeque<>();
 	private final Set<String> trustedIps = ConcurrentHashMap.newKeySet();
 	private final Set<String> blockedIps = ConcurrentHashMap.newKeySet();
+	private final Set<String> blessedHashes = ConcurrentHashMap.newKeySet();
+	private final ProfileStore profiles;
 
 	private volatile StagedAction staged;
 	private volatile boolean echo = true;
 
-	public PlasmaGateway(LocalBridge bridge) {
+	public PlasmaGateway(LocalBridge bridge, Path configDir) {
 		this.bridge = bridge;
+		this.configDir = configDir;
+		this.profiles = new ProfileStore(configDir);
 		registerCommands();
 		ClientTickEvents.END_CLIENT_TICK.register(client -> flushChat());
 	}
@@ -52,6 +62,13 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 	@Override
 	public void onCodeRequest(PendingRequest request) {
 		String ip = request.getSourceIp();
+		if (blockedIps.contains(ip)) {
+			chat(message(tr("plasma.auto.blocked",
+				styled(ip, ChatFormatting.DARK_RED, ChatFormatting.ITALIC),
+				code(request.describe())).withStyle(ChatFormatting.RED)));
+			request.deny("BLOCKED_IP");
+			return;
+		}
 		if (trustedIps.contains(ip)) {
 			chat(message(tr("plasma.auto.trusted",
 				styled(ip, ChatFormatting.DARK_GREEN, ChatFormatting.ITALIC),
@@ -59,11 +76,10 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 			request.execute();
 			return;
 		}
-		if (blockedIps.contains(ip)) {
-			chat(message(tr("plasma.auto.blocked",
-				styled(ip, ChatFormatting.DARK_RED, ChatFormatting.ITALIC),
-				code(request.describe())).withStyle(ChatFormatting.RED)));
-			request.deny("BLOCKED_IP");
+		if (blessedHashes.contains(request.getPayloadHash())) {
+			chat(message(tr("plasma.auto.blessed",
+				code(request.describe())).withStyle(ChatFormatting.GREEN)));
+			request.execute();
 			return;
 		}
 
@@ -78,7 +94,8 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 			command("/plasma deny"),
 			styled("always", ChatFormatting.AQUA, ChatFormatting.ITALIC),
 			command("/plasma trust"),
-			command("/plasma betray")).withStyle(ChatFormatting.GRAY)));
+			command("/plasma betray"),
+			command("/plasma bless")).withStyle(ChatFormatting.GRAY)));
 	}
 
 	@Override
@@ -133,6 +150,48 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 				}))
 				.then(ClientCommands.literal("betray").executes(context -> {
 					stageBetray();
+					return 1;
+				}))
+				.then(ClientCommands.literal("block")
+					.then(ClientCommands.argument("ip", StringArgumentType.greedyString()).executes(context -> {
+						blockIp(StringArgumentType.getString(context, "ip"));
+						return 1;
+					})))
+				.then(ClientCommands.literal("unblock")
+					.then(ClientCommands.argument("ip", StringArgumentType.greedyString()).executes(context -> {
+						unblockIp(StringArgumentType.getString(context, "ip"));
+						return 1;
+					})))
+				.then(ClientCommands.literal("bless").executes(context -> {
+					stageBless();
+					return 1;
+				}))
+				.then(ClientCommands.literal("unbless")
+					.then(ClientCommands.argument("hash", StringArgumentType.greedyString()).executes(context -> {
+						unbless(StringArgumentType.getString(context, "hash"));
+						return 1;
+					})))
+				.then(ClientCommands.literal("save")
+					.then(ClientCommands.argument("name", StringArgumentType.word()).executes(context -> {
+						saveProfile(StringArgumentType.getString(context, "name"));
+						return 1;
+					})))
+				.then(ClientCommands.literal("load")
+					.then(ClientCommands.argument("name", StringArgumentType.word()).executes(context -> {
+						loadProfile(StringArgumentType.getString(context, "name"));
+						return 1;
+					})))
+				.then(ClientCommands.literal("del")
+					.then(ClientCommands.argument("name", StringArgumentType.word()).executes(context -> {
+						delProfile(StringArgumentType.getString(context, "name"));
+						return 1;
+					})))
+				.then(ClientCommands.literal("list").executes(context -> {
+					listAll();
+					return 1;
+				}))
+				.then(ClientCommands.literal("status").executes(context -> {
+					status();
 					return 1;
 				}))
 				.then(ClientCommands.literal("forcekill").executes(context -> {
@@ -233,17 +292,166 @@ public class PlasmaGateway implements LocalBridge.BridgeListener {
 			.append(confirmTail())));
 	}
 
+	private void stageBless() {
+		PendingRequest request = currentRequest();
+		if (request == null) {
+			feedback(message(tr("plasma.no.pending").withStyle(ChatFormatting.RED)));
+			return;
+		}
+		String hash = request.getPayloadHash();
+		blessedHashes.add(hash);
+		request.execute();
+		feedback(message(tr("plasma.bless.done",
+			code(shortHash(hash)),
+			code(request.describe())).withStyle(ChatFormatting.GREEN)));
+	}
+
+	private void unbless(String hash) {
+		String normalized = hash.trim().toLowerCase(java.util.Locale.ROOT);
+		if (!blessedHashes.remove(normalized)) {
+			feedback(message(tr("plasma.unbless.missing",
+				styled(hash, ChatFormatting.DARK_RED, ChatFormatting.ITALIC)).withStyle(ChatFormatting.RED)));
+			return;
+		}
+		feedback(message(tr("plasma.unbless.done",
+			code(shortHash(normalized))).withStyle(ChatFormatting.GREEN)));
+	}
+
+	private void blockIp(String ip) {
+		String normalized = ip.trim();
+		blockedIps.add(normalized);
+		trustedIps.remove(normalized);
+		feedback(message(tr("plasma.block.done",
+			styled(normalized, ChatFormatting.DARK_RED, ChatFormatting.ITALIC)).withStyle(ChatFormatting.RED)));
+	}
+
+	private void unblockIp(String ip) {
+		String normalized = ip.trim();
+		if (!blockedIps.remove(normalized)) {
+			feedback(message(tr("plasma.unblock.missing",
+				styled(normalized, ChatFormatting.DARK_RED, ChatFormatting.ITALIC)).withStyle(ChatFormatting.RED)));
+			return;
+		}
+		feedback(message(tr("plasma.unblock.done",
+			styled(normalized, ChatFormatting.DARK_GREEN, ChatFormatting.ITALIC)).withStyle(ChatFormatting.GREEN)));
+	}
+
+	private void saveProfile(String name) {
+		PendingRequest request = currentRequest();
+		if (request == null) {
+			feedback(message(tr("plasma.no.pending").withStyle(ChatFormatting.RED)));
+			return;
+		}
+		profiles.put(name, request.getPayload());
+		feedback(message(tr("plasma.profile.saved",
+			styled(name, ChatFormatting.AQUA, ChatFormatting.BOLD)).withStyle(ChatFormatting.GREEN)));
+	}
+
+	private void loadProfile(String name) {
+		if (!profiles.names().contains(name)) {
+			feedback(message(tr("plasma.profile.missing",
+				styled(name, ChatFormatting.DARK_RED, ChatFormatting.ITALIC)).withStyle(ChatFormatting.RED)));
+			return;
+		}
+		PendingRequest detached = new PendingRequest(bridge, profiles.get(name), "profile:" + name, "127.0.0.1");
+		feedback(message(tr("plasma.profile.loaded",
+			styled(name, ChatFormatting.AQUA, ChatFormatting.BOLD)).withStyle(ChatFormatting.GREEN)));
+		bridge.execute(detached);
+	}
+
+	private void delProfile(String name) {
+		if (!profiles.remove(name)) {
+			feedback(message(tr("plasma.profile.missing",
+				styled(name, ChatFormatting.DARK_RED, ChatFormatting.ITALIC)).withStyle(ChatFormatting.RED)));
+			return;
+		}
+		feedback(message(tr("plasma.profile.deleted",
+			styled(name, ChatFormatting.AQUA, ChatFormatting.BOLD)).withStyle(ChatFormatting.GREEN)));
+	}
+
+	private void listAll() {
+		feedback(message(tr("plasma.list.trusted", styled(join(trustedIps), ChatFormatting.DARK_GREEN)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.list.blocked", styled(join(blockedIps), ChatFormatting.DARK_RED)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.list.blessed", styled(joinBlessed(), ChatFormatting.GOLD)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.list.profiles", styled(join(profiles.names()), ChatFormatting.AQUA)).withStyle(ChatFormatting.GRAY)));
+	}
+
+	private void status() {
+		feedback(message(tr("plasma.status.title").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD)));
+		if (bridge.isRunning()) {
+			feedback(message(tr("plasma.status.bridge.open",
+				styled(String.valueOf(bridge.getPort()), ChatFormatting.DARK_GREEN, ChatFormatting.BOLD)).withStyle(ChatFormatting.GRAY)));
+		} else {
+			feedback(message(tr("plasma.status.bridge.closed").withStyle(ChatFormatting.RED)));
+		}
+		feedback(message(tr("plasma.status.token", code(bridge.getToken())).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.echo",
+			styled(String.valueOf(echo), echo ? ChatFormatting.GREEN : ChatFormatting.RED)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.pending",
+			code(String.valueOf(pendingCount())).withStyle(ChatFormatting.GRAY))));
+		feedback(message(tr("plasma.status.trusted",
+			code(String.valueOf(trustedIps.size())),
+			styled(join(trustedIps), ChatFormatting.DARK_GREEN)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.blocked",
+			code(String.valueOf(blockedIps.size())),
+			styled(join(blockedIps), ChatFormatting.DARK_RED)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.blessed",
+			code(String.valueOf(blessedHashes.size())),
+			styled(joinBlessed(), ChatFormatting.GOLD)).withStyle(ChatFormatting.GRAY)));
+		feedback(message(tr("plasma.status.profiles",
+			code(String.valueOf(profiles.size())),
+			styled(join(profiles.names()), ChatFormatting.AQUA)).withStyle(ChatFormatting.GRAY)));
+	}
+
+	private int pendingCount() {
+		synchronized (pendingRequests) {
+			int count = 0;
+			for (PendingRequest request : pendingRequests) {
+				if (!request.isResolved()) {
+					count++;
+				}
+			}
+			return count;
+		}
+	}
+
+	private String join(Set<String> items) {
+		if (items.isEmpty()) {
+			return tr("plasma.list.empty").getString();
+		}
+		return String.join(", ", items);
+	}
+
+	private String joinBlessed() {
+		if (blessedHashes.isEmpty()) {
+			return tr("plasma.list.empty").getString();
+		}
+		List<String> shortHashes = new ArrayList<>();
+		for (String hash : blessedHashes) {
+			shortHashes.add(shortHash(hash));
+		}
+		return String.join(", ", shortHashes);
+	}
+
+	private static String shortHash(String hash) {
+		return hash.length() > 12 ? hash.substring(0, 12) + "..." : hash;
+	}
+
 	private void agree() {
 		if (bridge.isRunning()) {
 			feedback(message(tr("plasma.agree.already",
 				styled(String.valueOf(bridge.getPort()), ChatFormatting.DARK_GREEN, ChatFormatting.BOLD),
+				code(bridge.getToken()),
 				command("/plasma close")).withStyle(ChatFormatting.GREEN)));
 			return;
 		}
 		try {
+			String token = LocalBridgeConfig.rotate(configDir);
+			bridge.setToken(token);
 			bridge.start();
 			feedback(message(tr("plasma.agree.open",
 				styled(String.valueOf(bridge.getPort()), ChatFormatting.DARK_GREEN, ChatFormatting.BOLD),
+				code(token),
 				command("/plasma close")).withStyle(ChatFormatting.GREEN)));
 		} catch (IOException e) {
 			feedback(message(tr("plasma.agree.failed",

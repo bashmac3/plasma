@@ -29,11 +29,11 @@ Fabric-мод для Minecraft **26.2**, который открывает **л�
 
 В Windows используйте `gradlew.bat` вместо `./gradlew`.
 
-Готовый jar появится в `build/libs/bm3-plasma-1.1.0.jar`. Собранные jar для тегов публикуются как GitHub Releases.
+Готовый jar появится в `build/libs/bm3-plasma-1.1.1.jar`. Собранные jar для тегов публикуются как GitHub Releases.
 
 ## Установка
 
-1. Скопируйте `build/libs/bm3-plasma-1.1.0.jar` (или скачайте последний jar со страницы GitHub Releases) в папку `mods/` экземпляра **Fabric 26.2** (нужен Fabric API). Пользователи Legacy Launcher / vanilla: кладите в `.minecraft/mods` и запускайте профиль **Fabric**.
+1. Скопируйте `build/libs/bm3-plasma-1.1.1.jar` (или скачайте последний jar со страницы GitHub Releases) в папку `mods/` экземпляра **Fabric 26.2** (нужен Fabric API). Пользователи Legacy Launcher / vanilla: кладите в `.minecraft/mods` и запускайте профиль **Fabric**.
 2. Запустите игру. В чате появится предупреждение. Мост остаётся **закрытым**, пока вы не введёте `/plasma agree` — команда покажет открытый порт.
 3. Отправляйте payload с той же машины (только localhost) через `scripts/send_payload.py` или помощники из `examples/`.
 

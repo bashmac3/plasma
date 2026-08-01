@@ -53,4 +53,4 @@ jobs:
       - name: create release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/libs/bm3-plasma-1.1.0.jar
+          files: build/libs/bm3-plasma-1.1.1.jar

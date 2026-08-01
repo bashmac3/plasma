@@ -1,0 +1,1 @@
+{"method":"run","code":"bm3.plasma.client.gui.SimpleGui.builder(\"Snippet screen\").label(8, 8, \"Built from a code snippet\").button(8, 32, 100, 20, \"Close\", () -> bm3.plasma.client.gui.SimpleGui.close()).show();"}

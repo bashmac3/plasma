@@ -1,1 +1,1 @@
-{"method":"run","code":"net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance(); System.out.println(\"Привет, \" + mc.player.getName().getString() + \"! Это Plasma исполняет произвольный Java-код прямо в игре.\");"}
+{"method":"run","code":"net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance(); System.out.println(\"Hello, \" + mc.player.getName().getString() + \"! This is Plasma running arbitrary Java code right inside the game.\");"}
